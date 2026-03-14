@@ -1,0 +1,17 @@
+{
+  "model": "mlp",
+  "val_acc": 0.516667,
+  "test_acc": 0.55,
+  "test_loss": 1.342374,
+  "hparams": {
+    "hidden_channels": 64,
+    "num_layers": 3,
+    "num_lin_layers": 1,
+    "lr": 0.003,
+    "weight_decay": 0.0,
+    "batch_size": 256,
+    "max_epochs": 5000,
+    "patience": 50,
+    "eval_freq": 10
+  }
+}
