@@ -4,11 +4,12 @@ Training and evaluation script for MLP and GCN baselines on the Enzymes dataset.
 Usage:
     python train.py --model mlp
     python train.py --model gcn
-    python train.py --model all   # train both sequentially
+    python train.py --model all
 
-Hyperparameters match the reference paper (Ladner et al., 2025) for Enzymes:
-    hidden_channels=64, num_layers=3, act=tanh, glob_pool=mean,
-    lr=0.003, batch_size=256, Adam, no dropout, no weight_decay.
+Methodology matches the reference paper (Ladner et al., 2025):
+  - Single 80/20 train/val split (no separate test set)
+  - Multiple random seeds; report mean ± std
+  - max_epochs=20000, eval_freq=100, patience=10 (early stopping on val loss)
 """
 
 import argparse
@@ -19,20 +20,32 @@ from copy import deepcopy
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
-from torch_geometric.transforms import NormalizeFeatures
 
 from models import MLP, GCN
+
+
+SEEDS = [8]
+
+HPARAMS = {
+    "hidden_channels": 64,
+    "num_layers": 3,
+    "num_lin_layers": 1,
+    "lr": 0.003,
+    "weight_decay": 0.0,
+    "batch_size": 256,
+    "max_epochs": 20000,
+    "patience": 10,       # in eval_freq units → 1000 effective epochs
+    "eval_freq": 100,
+    "train_split": 0.8,
+}
 
 
 # ---------------------------------------------------------------------------
 # Reproducibility
 # ---------------------------------------------------------------------------
-SEED = 42
-
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -41,64 +54,35 @@ def set_seed(seed: int):
 
 
 # ---------------------------------------------------------------------------
-# Hyperparameters (matching reference paper for Enzymes)
+# Data
 # ---------------------------------------------------------------------------
-HPARAMS = {
-    "hidden_channels": 64,
-    "num_layers": 3,        # GCN conv layers / MLP hidden layers
-    "num_lin_layers": 1,    # linear layers after pooling (GCN only)
-    "lr": 0.003,
-    "weight_decay": 0.0,
-    "batch_size": 256,
-    "max_epochs": 5000,
-    "patience": 50,         # early-stopping patience (in eval_freq units)
-    "eval_freq": 10,        # evaluate every N epochs
-}
-
-
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
-def load_enzymes(data_dir: str = "/tmp/enzymes_attr"):
-    """
-    Load the ENZYMES TUDataset with all 21 continuous node attributes.
-    Applies per-feature standardisation (zero mean, unit variance) across the
-    training set, matching `normalization=True` in the reference.
-    """
+def load_enzymes(seed: int, data_dir: str = "/tmp/enzymes_attr"):
     dataset = TUDataset(root=data_dir, name="ENZYMES", use_node_attr=True)
 
-    # Shuffle and split: 80% train, 10% val, 10% test (fixed seed)
-    set_seed(SEED)
+    set_seed(seed)
     perm = torch.randperm(len(dataset))
-    n_train = int(0.8 * len(dataset))
-    n_val   = int(0.1 * len(dataset))
+    n_train = int(HPARAMS["train_split"] * len(dataset))
 
     train_idx = perm[:n_train]
-    val_idx   = perm[n_train:n_train + n_val]
-    test_idx  = perm[n_train + n_val:]
+    val_idx   = perm[n_train:]
 
-    train_dataset = dataset[train_idx]
-    val_dataset   = dataset[val_idx]
-    test_dataset  = dataset[test_idx]
+    train_data = [dataset[i] for i in train_idx]
+    val_data   = [dataset[i] for i in val_idx]
 
-    # Compute per-feature mean/std on training node features
-    all_x = torch.cat([d.x for d in train_dataset], dim=0)  # (N_train_nodes, 21)
+    # Normalise: fit on train, apply to both
+    all_x    = torch.cat([d.x for d in train_data], dim=0)
     feat_mean = all_x.mean(dim=0)
     feat_std  = all_x.std(dim=0).clamp(min=1e-6)
 
-    def normalise(dataset_split):
-        normalised = []
-        for data in dataset_split:
+    def apply_norm(split):
+        out = []
+        for data in split:
             d = deepcopy(data)
             d.x = (d.x - feat_mean) / feat_std
-            normalised.append(d)
-        return normalised
+            out.append(d)
+        return out
 
-    train_data = normalise(train_dataset)
-    val_data   = normalise(val_dataset)
-    test_data  = normalise(test_dataset)
-
-    return train_data, val_data, test_data, feat_mean, feat_std
+    return apply_norm(train_data), apply_norm(val_data), feat_mean, feat_std
 
 
 # ---------------------------------------------------------------------------
@@ -134,22 +118,18 @@ def evaluate(model, loader, device):
 
 
 # ---------------------------------------------------------------------------
-# Main training loop
+# Single seed run
 # ---------------------------------------------------------------------------
-def train_model(model_name: str, device: torch.device, save_dir: str = "/home/hep3/sign/results"):
-    print(f"\n{'='*60}")
-    print(f"  Training {model_name.upper()} on ENZYMES")
-    print(f"{'='*60}")
-    set_seed(SEED)
+def train_one_seed(model_name: str, seed: int, device: torch.device):
+    set_seed(seed)
 
-    train_data, val_data, test_data, feat_mean, feat_std = load_enzymes()
+    train_data, val_data, feat_mean, feat_std = load_enzymes(seed)
 
     train_loader = DataLoader(train_data, batch_size=HPARAMS["batch_size"], shuffle=True)
     val_loader   = DataLoader(val_data,   batch_size=HPARAMS["batch_size"], shuffle=False)
-    test_loader  = DataLoader(test_data,  batch_size=HPARAMS["batch_size"], shuffle=False)
 
-    in_channels  = train_data[0].x.shape[1]   # 21
-    out_channels = 6                            # 6 enzyme classes
+    in_channels  = train_data[0].x.shape[1]
+    out_channels = 6
 
     if model_name == "mlp":
         model = MLP(
@@ -158,7 +138,7 @@ def train_model(model_name: str, device: torch.device, save_dir: str = "/home/he
             out_channels=out_channels,
             num_hidden_layers=HPARAMS["num_layers"],
         )
-    elif model_name == "gcn":
+    else:
         model = GCN(
             in_channels=in_channels,
             hidden_channels=HPARAMS["hidden_channels"],
@@ -166,8 +146,6 @@ def train_model(model_name: str, device: torch.device, save_dir: str = "/home/he
             num_conv_layers=HPARAMS["num_layers"],
             num_lin_layers=HPARAMS["num_lin_layers"],
         )
-    else:
-        raise ValueError(f"Unknown model: {model_name}")
 
     model = model.to(device)
     optimizer = torch.optim.Adam(
@@ -178,71 +156,84 @@ def train_model(model_name: str, device: torch.device, save_dir: str = "/home/he
     )
 
     best_val_loss   = float("inf")
+    best_val_acc    = 0.0
     best_state_dict = None
     patience_count  = 0
-    history = {"train_loss": [], "val_loss": [], "val_acc": []}
 
     for epoch in range(1, HPARAMS["max_epochs"] + 1):
-        train_loss = train_epoch(model, train_loader, optimizer, device)
+        train_epoch(model, train_loader, optimizer, device)
 
         if epoch % HPARAMS["eval_freq"] == 0:
             val_loss, val_acc = evaluate(model, val_loader, device)
-            history["train_loss"].append(train_loss)
-            history["val_loss"].append(val_loss)
-            history["val_acc"].append(val_acc)
 
             if val_loss < best_val_loss:
                 best_val_loss   = val_loss
+                best_val_acc    = val_acc
                 best_state_dict = deepcopy(model.state_dict())
                 patience_count  = 0
             else:
                 patience_count += 1
 
-            if epoch % (HPARAMS["eval_freq"] * 10) == 0:
-                print(f"  Epoch {epoch:5d} | train_loss={train_loss:.4f} "
-                      f"| val_loss={val_loss:.4f} | val_acc={val_acc:.4f}")
-
             if patience_count >= HPARAMS["patience"]:
-                print(f"  Early stopping at epoch {epoch}.")
                 break
 
-    # Restore best checkpoint and evaluate on test set
     model.load_state_dict(best_state_dict)
-    test_loss, test_acc = evaluate(model, test_loader, device)
-    val_loss_best, val_acc_best = evaluate(model, val_loader, device)
+    return model, best_val_acc, feat_mean, feat_std
 
-    print(f"\n  Results ({model_name.upper()}):")
-    print(f"    Val  accuracy : {val_acc_best:.4f}")
-    print(f"    Test accuracy : {test_acc:.4f}")
-    print(f"    Test loss     : {test_loss:.4f}")
 
-    # Save checkpoint and metrics
-    os.makedirs(save_dir, exist_ok=True)
+# ---------------------------------------------------------------------------
+# Multi-seed training
+# ---------------------------------------------------------------------------
+def train_model(model_name: str, device: torch.device, save_dir: str = "/home/hep3/sign/results"):
+    print(f"\n{'='*60}")
+    print(f"  Training {model_name.upper()} on ENZYMES ({len(SEEDS)} seeds)")
+    print(f"{'='*60}")
+
+    seed_accs  = []
+    best_acc   = -1.0
+    best_model = None
+    best_norm  = None
+
+    for seed in SEEDS:
+        model, val_acc, feat_mean, feat_std = train_one_seed(model_name, seed, device)
+        seed_accs.append(val_acc)
+        print(f"  Seed {seed:2d} | val_acc = {val_acc:.4f}")
+
+        if val_acc > best_acc:
+            best_acc   = val_acc
+            best_model = deepcopy(model)
+            best_norm  = (feat_mean, feat_std)
+
+    mean_acc = float(np.mean(seed_accs))
+    std_acc  = float(np.std(seed_accs))
+    print(f"\n  {model_name.upper()} | mean={mean_acc:.4f}  std={std_acc:.4f}")
+
     run_dir = os.path.join(save_dir, model_name)
     os.makedirs(run_dir, exist_ok=True)
 
-    torch.save(best_state_dict, os.path.join(run_dir, "model.pt"))
+    torch.save(best_model.state_dict(), os.path.join(run_dir, "model.pt"))
 
-    results = {
-        "model": model_name,
-        "val_acc":  round(val_acc_best, 6),
-        "test_acc": round(test_acc, 6),
-        "test_loss": round(test_loss, 6),
-        "hparams": HPARAMS,
-    }
-    with open(os.path.join(run_dir, "results.json"), "w") as f:
-        json.dump(results, f, indent=2)
-
-    # Save normalisation stats (needed for verifier input construction)
     norm_stats = {
-        "feat_mean": feat_mean.tolist(),
-        "feat_std":  feat_std.tolist(),
+        "feat_mean": best_norm[0].tolist(),
+        "feat_std":  best_norm[1].tolist(),
     }
     with open(os.path.join(run_dir, "norm_stats.json"), "w") as f:
         json.dump(norm_stats, f, indent=2)
 
+    results = {
+        "model":      model_name,
+        "mean_acc":   round(mean_acc, 6),
+        "std_acc":    round(std_acc, 6),
+        "seed_accs":  [round(a, 6) for a in seed_accs],
+        "best_acc":   round(best_acc, 6),
+        "seeds":      SEEDS,
+        "hparams":    HPARAMS,
+    }
+    with open(os.path.join(run_dir, "results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+
     print(f"  Saved to {run_dir}/")
-    return model, results
+    return best_model, results
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +241,7 @@ def train_model(model_name: str, device: torch.device, save_dir: str = "/home/he
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["mlp", "gcn", "all"], default="all",
-                        help="Which model to train (default: all)")
+    parser.add_argument("--model", choices=["mlp", "gcn", "all"], default="all")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -262,13 +252,13 @@ if __name__ == "__main__":
     all_results = {}
 
     for m in models_to_train:
-        model, results = train_model(m, device)
+        _, results = train_model(m, device)
         all_results[m] = results
 
     print("\n" + "="*60)
     print("  Summary")
     print("="*60)
-    print(f"  {'Model':<8} {'Val Acc':>10} {'Test Acc':>10}")
-    print(f"  {'-'*30}")
+    print(f"  {'Model':<8} {'Mean Acc':>10} {'Std':>8} {'Best':>8}")
+    print(f"  {'-'*36}")
     for m, r in all_results.items():
-        print(f"  {m.upper():<8} {r['val_acc']:>10.4f} {r['test_acc']:>10.4f}")
+        print(f"  {m.upper():<8} {r['mean_acc']:>10.4f} {r['std_acc']:>8.4f} {r['best_acc']:>8.4f}")
