@@ -158,7 +158,7 @@ if __name__ == "__main__":
 
     models_to_export = ["mlp", "gcn"] if args.model == "all" else [args.model]
 
-    train_data, *_ = load_enzymes()
+    train_data, *_ = load_enzymes(seed=8)
     in_channels  = train_data[0].x.shape[1]
     out_channels = 6
 
