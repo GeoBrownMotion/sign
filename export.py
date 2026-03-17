@@ -149,7 +149,7 @@ def export_model(model_name: str,
 
 if __name__ == "__main__":
     import argparse
-    from train import load_enzymes, HPARAMS
+    from train import load_enzymes, MLP_HPARAMS, GCN_HPARAMS
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=["mlp", "gcn", "all"], default="all")
@@ -163,20 +163,20 @@ if __name__ == "__main__":
     out_channels = 6
 
     for name in models_to_export:
-        run_dir    = os.path.join(args.results_dir, name)
-        ckpt_path  = os.path.join(run_dir, "model.pt")
+        run_dir   = os.path.join(args.results_dir, name)
+        ckpt_path = os.path.join(run_dir, "model.pt")
 
         if not os.path.exists(ckpt_path):
             print(f"  [skip] No checkpoint found for {name} at {ckpt_path}")
             continue
 
         if name == "mlp":
-            model = MLP(in_channels, HPARAMS["hidden_channels"],
-                        out_channels, HPARAMS["num_layers"])
+            model = MLP(in_channels, MLP_HPARAMS["hidden_channels"],
+                        out_channels, MLP_HPARAMS["num_layers"])
         else:
-            model = GCN(in_channels, HPARAMS["hidden_channels"],
-                        out_channels, HPARAMS["num_layers"],
-                        HPARAMS["num_lin_layers"])
+            model = GCN(in_channels, GCN_HPARAMS["hidden_channels"],
+                        out_channels, GCN_HPARAMS["num_layers"],
+                        GCN_HPARAMS["num_lin_layers"])
 
         model.load_state_dict(torch.load(ckpt_path, map_location="cpu"))
         model.eval()

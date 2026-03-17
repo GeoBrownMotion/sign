@@ -1,0 +1,16 @@
+{
+  "gcn_tanh_h64_c3_l1": 0.7417,
+  "gcn_tanh_h64_c4_l1": 0.7333,
+  "gcn_tanh_h64_c5_l1": 0.75,
+  "gcn_tanh_h64_c6_l1": 0.6917,
+  "gcn_tanh_h64_c3_l2": 0.6917,
+  "gcn_tanh_h64_c5_l2": 0.7,
+  "gcn_tanh_h128_c3_l1": 0.725,
+  "gcn_tanh_h128_c4_l1": 0.7667,
+  "gcn_tanh_h128_c5_l1": 0.7167,
+  "gcn_tanh_h128_c3_l2": 0.6917,
+  "gcn_tanh_h128_c5_l2": 0.7583,
+  "gcn_tanh_h256_c3_l1": 0.7083,
+  "gcn_tanh_h256_c4_l1": 0.75,
+  "gcn_tanh_h256_c5_l1": 0.725
+}

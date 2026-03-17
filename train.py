@@ -30,9 +30,6 @@ from models import MLP, GCN
 SEEDS = [8]
 
 HPARAMS = {
-    "hidden_channels": 64,
-    "num_layers": 3,
-    "num_lin_layers": 1,
     "lr": 0.003,
     "weight_decay": 0.0,
     "batch_size": 256,
@@ -40,6 +37,18 @@ HPARAMS = {
     "patience": 10,       # in eval_freq units → 1000 effective epochs
     "eval_freq": 100,
     "train_split": 0.8,
+}
+
+# Model-specific architecture configs
+MLP_HPARAMS = {
+    "hidden_channels": 256,
+    "num_layers": 4,
+}
+
+GCN_HPARAMS = {
+    "hidden_channels": 128,
+    "num_layers": 4,
+    "num_lin_layers": 1,
 }
 
 
@@ -134,17 +143,17 @@ def train_one_seed(model_name: str, seed: int, device: torch.device):
     if model_name == "mlp":
         model = MLP(
             in_channels=in_channels,
-            hidden_channels=HPARAMS["hidden_channels"],
+            hidden_channels=MLP_HPARAMS["hidden_channels"],
             out_channels=out_channels,
-            num_hidden_layers=HPARAMS["num_layers"],
+            num_hidden_layers=MLP_HPARAMS["num_layers"],
         )
     else:
         model = GCN(
             in_channels=in_channels,
-            hidden_channels=HPARAMS["hidden_channels"],
+            hidden_channels=GCN_HPARAMS["hidden_channels"],
             out_channels=out_channels,
-            num_conv_layers=HPARAMS["num_layers"],
-            num_lin_layers=HPARAMS["num_lin_layers"],
+            num_conv_layers=GCN_HPARAMS["num_layers"],
+            num_lin_layers=GCN_HPARAMS["num_lin_layers"],
         )
 
     model = model.to(device)
@@ -220,6 +229,7 @@ def train_model(model_name: str, device: torch.device, save_dir: str = "/home/he
     with open(os.path.join(run_dir, "norm_stats.json"), "w") as f:
         json.dump(norm_stats, f, indent=2)
 
+    model_hparams = {**HPARAMS, **(MLP_HPARAMS if model_name == "mlp" else GCN_HPARAMS)}
     results = {
         "model":      model_name,
         "mean_acc":   round(mean_acc, 6),
@@ -227,7 +237,7 @@ def train_model(model_name: str, device: torch.device, save_dir: str = "/home/he
         "seed_accs":  [round(a, 6) for a in seed_accs],
         "best_acc":   round(best_acc, 6),
         "seeds":      SEEDS,
-        "hparams":    HPARAMS,
+        "hparams":    model_hparams,
     }
     with open(os.path.join(run_dir, "results.json"), "w") as f:
         json.dump(results, f, indent=2)
