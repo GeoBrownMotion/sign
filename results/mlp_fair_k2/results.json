@@ -1,0 +1,20 @@
+{
+  "model": "mlp_fair_k2",
+  "description": "Pool-first MLP with hidden=262 to match SIGN K=2 params",
+  "hidden_channels": 262,
+  "num_layers": 4,
+  "total_params": 214060,
+  "sign_k": 2,
+  "sign_params": 215302,
+  "val_acc": 0.708333,
+  "seed": 8,
+  "hparams": {
+    "lr": 0.003,
+    "weight_decay": 0.0,
+    "batch_size": 256,
+    "max_epochs": 20000,
+    "patience": 10,
+    "eval_freq": 100,
+    "train_split": 0.8
+  }
+}
