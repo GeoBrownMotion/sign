@@ -1,0 +1,17 @@
+{
+  "model": "node_mlp_fair_k4",
+  "val_acc": 0.572,
+  "seed": 8,
+  "hparams": {
+    "lr": 0.01,
+    "weight_decay": 0.0005,
+    "dropout": 0.5,
+    "max_epochs": 10000,
+    "patience": 20,
+    "eval_freq": 10,
+    "K": 4,
+    "hidden": 296,
+    "layers": 2,
+    "sign_params": 1189574
+  }
+}

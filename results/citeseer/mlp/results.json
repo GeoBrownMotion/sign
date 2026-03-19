@@ -1,0 +1,16 @@
+{
+  "model": "node_mlp",
+  "val_acc": 0.586,
+  "seed": 8,
+  "hparams": {
+    "lr": 0.01,
+    "weight_decay": 0.0005,
+    "dropout": 0.5,
+    "max_epochs": 10000,
+    "patience": 20,
+    "eval_freq": 10,
+    "hidden": 64,
+    "layers": 2,
+    "act": "relu"
+  }
+}

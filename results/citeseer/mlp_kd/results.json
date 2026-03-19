@@ -1,0 +1,16 @@
+{
+  "model": "node_mlp_kd",
+  "val_acc": 0.562,
+  "seed": 8,
+  "hparams": {
+    "lr": 0.01,
+    "weight_decay": 0.0005,
+    "dropout": 0.5,
+    "max_epochs": 10000,
+    "patience": 20,
+    "eval_freq": 10,
+    "lambda": 0.5,
+    "temperature": 4.0,
+    "hidden": 64
+  }
+}
