@@ -1,0 +1,17 @@
+{
+  "model": "node_mlp_fair_k2",
+  "val_f1": 0.534943,
+  "seed": 8,
+  "hparams": {
+    "lr": 0.005,
+    "weight_decay": 0.0,
+    "max_epochs": 2000,
+    "patience": 50,
+    "eval_freq": 5,
+    "batch_size": 2,
+    "K": 2,
+    "hidden": 553,
+    "layers": 2,
+    "sign_params": 402041
+  }
+}
