@@ -1,0 +1,17 @@
+{
+  "model": "node_gcn_pca",
+  "val_acc": 0.66,
+  "seed": 8,
+  "pca_dim": 32,
+  "hparams": {
+    "lr": 0.01,
+    "weight_decay": 0.0005,
+    "max_epochs": 10000,
+    "patience": 20,
+    "eval_freq": 10,
+    "hidden": 64,
+    "conv_layers": 2,
+    "lin_layers": 2,
+    "dropout": 0.5
+  }
+}
