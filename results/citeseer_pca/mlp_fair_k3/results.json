@@ -1,0 +1,19 @@
+{
+  "model": "node_mlp_pca_fair_k3",
+  "val_acc": 0.538,
+  "seed": 8,
+  "pca_dim": 32,
+  "hparams": {
+    "lr": 0.01,
+    "weight_decay": 0.0005,
+    "max_epochs": 10000,
+    "patience": 20,
+    "eval_freq": 10,
+    "K": 3,
+    "hidden": 94,
+    "layers": 2,
+    "act": "relu",
+    "dropout": 0.2,
+    "sign_params": 12806
+  }
+}

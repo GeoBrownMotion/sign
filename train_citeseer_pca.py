@@ -2,10 +2,15 @@
 CiteSeer with PCA preprocessing (3703 → 32 dims).
 
 PCA is fit on training nodes only (120 nodes), then applied to all nodes.
-Only NodeMLP and NodeGCN are trained (SIGN/FairMLP/MLP-KD not needed here).
+Models trained:
+  1. NodeMLP            - per-node MLP, no message passing
+  2. NodeGCN            - GCN without global pooling
+  3. Fair MLP K=1..4    - NodeMLP with hidden matched to SIGN K=1..4 params
+  4. MLP-KD             - NodeMLP distilled from NodeGCN teacher
 """
 
 import json
+import math
 import os
 import random
 from copy import deepcopy
@@ -156,6 +161,21 @@ def save_results(name, model, val_acc, extra, save_dir):
     print(f"  val_acc = {val_acc:.4f}  →  {save_dir}/")
 
 
+def count_params(m):
+    return sum(p.numel() for p in m.parameters())
+
+
+def fair_mlp_hidden(sign_params, in_ch, layers=2, out_ch=6):
+    """Solve for hidden h such that NodeMLP(in_ch, h, out_ch, layers) ≈ sign_params."""
+    a = layers - 1
+    b = in_ch + layers + out_ch
+    c = out_ch - sign_params
+    if a == 0:
+        return max(int((sign_params - out_ch) / b), 1)
+    h = int((-b + math.sqrt(max(b**2 - 4*a*c, 0))) / (2*a))
+    return max(h, 1)
+
+
 if __name__ == "__main__":
     set_seed(SEED)
     data, pca = load_citeseer_pca()
@@ -194,13 +214,82 @@ if __name__ == "__main__":
     export_model("node_gcn_pca", gcn, d)
 
     # ------------------------------------------------------------------
+    # 3. Fair MLP K=1,2,3,4 (params match SIGN K=1..4 on PCA features)
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 50)
+    print("3. Fair MLP (params ≈ SIGN K=1/2/3/4)")
+    for K in [1, 2, 3, 4]:
+        sign_in  = (K + 1) * in_ch
+        sign_ref = NodeMLP(sign_in, MLP_HIDDEN, out_ch, num_hidden_layers=2,
+                           act=MLP_ACT, dropout=MLP_DROPOUT)
+        sign_params = count_params(sign_ref)
+        fair_h = fair_mlp_hidden(sign_params, in_ch=in_ch, layers=2, out_ch=out_ch)
+        print(f"  K={K}  SIGN params={sign_params:,}  →  Fair MLP hidden={fair_h}")
+
+        set_seed(SEED)
+        fair_mlp = NodeMLP(in_ch, fair_h, out_ch, num_hidden_layers=2,
+                           act=MLP_ACT, dropout=MLP_DROPOUT).to(DEVICE)
+        fair_mlp, acc = run_training(fair_mlp, data)
+        d = os.path.join(SAVE_ROOT, f"mlp_fair_k{K}")
+        save_results(f"node_mlp_pca_fair_k{K}", fair_mlp, acc,
+                     {"K": K, "hidden": fair_h, "layers": 2,
+                      "act": MLP_ACT, "dropout": MLP_DROPOUT,
+                      "sign_params": sign_params}, d)
+        export_model(f"node_mlp_pca_fair_k{K}", fair_mlp, d)
+
+    # ------------------------------------------------------------------
+    # 4. MLP-KD (distill from NodeGCN)
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 50)
+    print("4. MLP-KD  (T=4, lambda=0.5)")
+    LAM, TEMP = 0.5, 4.0
+    gcn.eval()
+
+    set_seed(SEED)
+    student = NodeMLP(in_ch, MLP_HIDDEN, out_ch, num_hidden_layers=2,
+                      act=MLP_ACT, dropout=MLP_DROPOUT).to(DEVICE)
+    optimizer = torch.optim.Adam(student.parameters(),
+                                 lr=HPARAMS["lr"], weight_decay=HPARAMS["weight_decay"])
+    best_loss, best_acc, patience_count, best_state = float("inf"), 0.0, 0, None
+
+    for epoch in range(1, HPARAMS["max_epochs"] + 1):
+        student.train()
+        optimizer.zero_grad()
+        out = student(data.x, data.edge_index)
+        loss_ce = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
+        with torch.no_grad():
+            t_soft = F.softmax(gcn(data.x, data.edge_index)[data.train_mask] / TEMP, dim=-1)
+        loss_kd = F.kl_div(F.log_softmax(out[data.train_mask] / TEMP, dim=-1),
+                           t_soft, reduction="batchmean") * (TEMP ** 2)
+        (LAM * loss_ce + (1 - LAM) * loss_kd).backward()
+        optimizer.step()
+
+        if epoch % HPARAMS["eval_freq"] == 0:
+            val_loss, val_acc = evaluate(student, data)
+            if val_loss < best_loss:
+                best_loss, best_acc, patience_count = val_loss, val_acc, 0
+                best_state = deepcopy(student.state_dict())
+            else:
+                patience_count += 1
+            if patience_count >= HPARAMS["patience"]:
+                break
+
+    student.load_state_dict(best_state)
+    d = os.path.join(SAVE_ROOT, "mlp_kd")
+    save_results("node_mlp_pca_kd", student, best_acc,
+                 {"lambda": LAM, "temperature": TEMP, "hidden": MLP_HIDDEN,
+                  "act": MLP_ACT, "dropout": MLP_DROPOUT}, d)
+    export_model("node_mlp_pca_kd", student, d)
+
+    # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
     print("\n" + "=" * 50)
     print("Summary (CiteSeer PCA val acc)")
     print("=" * 50)
-    for subdir in ["mlp", "gcn"]:
+    for subdir in ["mlp", "gcn", "mlp_fair_k1", "mlp_fair_k2",
+                   "mlp_fair_k3", "mlp_fair_k4", "mlp_kd"]:
         rpath = os.path.join(SAVE_ROOT, subdir, "results.json")
         if os.path.exists(rpath):
             r = json.load(open(rpath))
-            print(f"  {subdir:<6}  {r['val_acc']:.4f}")
+            print(f"  {subdir:<14}  {r['val_acc']:.4f}")
