@@ -1,4 +1,10 @@
 {
+  "metadata": {
+    "backend_format": "cora-json-v1",
+    "model_family": "gcn",
+    "task_level": "graph",
+    "uses_edge_features": false
+  },
   "layers": [
     {
       "type": "gcn",
@@ -53410,7 +53416,7 @@
     },
     {
       "type": "lin",
-      "act": "",
+      "act": "tanh",
       "W": [
         [
           -0.7463347315788269,

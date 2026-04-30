@@ -1,0 +1,16 @@
+{
+  "model": "gcn",
+  "dataset": "citeseer_pca",
+  "metric": "accuracy",
+  "perturbed_results": {
+    "clean": 0.6649,
+    "edge_frac0.001": 0.6649,
+    "edge_frac0.005": 0.6649,
+    "edge_frac0.01": 0.6652,
+    "edge_frac0.05": 0.6631,
+    "feat_eps0.001": 0.6649,
+    "feat_eps0.005": 0.6667,
+    "feat_eps0.01": 0.6664,
+    "feat_eps0.05": 0.6652
+  }
+}

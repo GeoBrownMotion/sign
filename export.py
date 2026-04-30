@@ -22,8 +22,10 @@ aggregation is positioned in the inference graph.
 
 import json
 import os
+from typing import Optional
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from models import MLP, GCN
 
@@ -46,9 +48,27 @@ def _pool_entry() -> dict:
     return {"type": "global_mean_pool", "act": "", "W": [], "b": []}
 
 
-def _act_str(is_last: bool) -> str:
-    """All hidden layers use tanh; the output layer has no activation."""
-    return "" if is_last else "tanh"
+def _activation_name(module: Optional[nn.Module]) -> str:
+    if module is None:
+        return ""
+    if isinstance(module, nn.Tanh):
+        return "tanh"
+    if isinstance(module, nn.ReLU):
+        return "relu"
+    return ""
+
+
+def _export_linear_stack(seq: nn.Sequential) -> list[dict]:
+    layers = []
+    children = list(seq.children())
+    for idx, module in enumerate(children):
+        if not isinstance(module, nn.Linear):
+            continue
+        act = ""
+        if idx + 1 < len(children):
+            act = _activation_name(children[idx + 1])
+        layers.append(_linear_to_dict(module, act))
+    return layers
 
 
 # ---------------------------------------------------------------------------
@@ -76,19 +96,21 @@ def export_gcn(model: GCN) -> dict:
             "b":    conv.bias.detach().cpu().tolist(),        # (out,)
         })
 
-    # --- Linear layers after pooling ---
-    # model.lins is a Sequential; extract nn.Linear sub-modules in order.
-    lin_modules = [m for m in model.lins.modules()
-                   if isinstance(m, nn.Linear)]
-    num_lin = len(lin_modules)
-    for i, lin in enumerate(lin_modules):
-        is_last = (i == num_lin - 1)
-        layers.append(_linear_to_dict(lin, _act_str(is_last)))
+    # --- Linear layers before pooling ---
+    layers.extend(_export_linear_stack(model.lins))
 
     # --- Global mean pool (marker at end, matching reference) ---
     layers.append(_pool_entry())
 
-    return {"layers": layers}
+    return {
+        "metadata": {
+            "backend_format": "cora-json-v1",
+            "model_family": "gcn",
+            "task_level": "graph",
+            "uses_edge_features": False,
+        },
+        "layers": layers,
+    }
 
 
 def export_mlp(model: MLP) -> dict:
@@ -100,14 +122,17 @@ def export_mlp(model: MLP) -> dict:
     """
     layers = [_pool_entry()]
 
-    lin_modules = [m for m in model.net.modules()
-                   if isinstance(m, nn.Linear)]
-    num_lin = len(lin_modules)
-    for i, lin in enumerate(lin_modules):
-        is_last = (i == num_lin - 1)
-        layers.append(_linear_to_dict(lin, _act_str(is_last)))
+    layers.extend(_export_linear_stack(model.net))
 
-    return {"layers": layers}
+    return {
+        "metadata": {
+            "backend_format": "cora-json-v1",
+            "model_family": "mlp",
+            "task_level": "graph",
+            "uses_edge_features": False,
+        },
+        "layers": layers,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +168,64 @@ def export_model(model_name: str,
     return out_path
 
 
+def export_data(model_name: str,
+                model: nn.Module,
+                dataset: list,
+                save_dir: str) -> str:
+    """
+    Export the model-matched validation split used by the latest baselines.
+    """
+    headers = [
+        "input",
+        "output",
+        "output_label",
+        "target_label",
+        "loss",
+        "edge_index",
+        "edge_weight",
+    ]
+    rows = [headers]
+
+    model.eval()
+    device = next(model.parameters()).device
+    correct = 0
+
+    with torch.no_grad():
+        for data in dataset:
+            x = data.x.to(device)
+            edge_index = data.edge_index.to(device)
+            batch = torch.zeros(x.size(0), dtype=torch.long, device=device)
+            target = data.y.view(-1).to(device)
+
+            logits = model(x, edge_index, batch).view(-1)
+            pred = int(logits.argmax().item())
+            target_label = int(target.item())
+            loss = float(F.cross_entropy(logits.unsqueeze(0), target).item())
+            correct += int(pred == target_label)
+
+            rows.append([
+                data.x.detach().cpu().tolist(),
+                [logits.detach().cpu().tolist()],
+                pred,
+                target_label,
+                loss,
+                data.edge_index.detach().cpu().tolist(),
+                [],
+            ])
+
+    os.makedirs(save_dir, exist_ok=True)
+    out_path = os.path.join(save_dir, "data_export.json")
+    with open(out_path, "w") as f:
+        json.dump(rows, f)
+
+    accuracy = correct / len(dataset) if dataset else float("nan")
+    print(
+        f"  Exported {model_name.upper()} val data → {out_path} "
+        f"({len(dataset)} samples, clean_acc={accuracy:.4f})"
+    )
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -158,7 +241,7 @@ if __name__ == "__main__":
 
     models_to_export = ["mlp", "gcn"] if args.model == "all" else [args.model]
 
-    train_data, *_ = load_enzymes(seed=8)
+    train_data, val_data, *_ = load_enzymes(seed=8)
     in_channels  = train_data[0].x.shape[1]
     out_channels = 6
 
@@ -182,3 +265,4 @@ if __name__ == "__main__":
         model.eval()
 
         export_model(name, model, run_dir)
+        export_data(name, model, val_data, run_dir)

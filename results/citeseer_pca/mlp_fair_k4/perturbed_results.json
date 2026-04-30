@@ -1,0 +1,16 @@
+{
+  "model": "mlp_fair_k4",
+  "dataset": "citeseer_pca",
+  "metric": "accuracy",
+  "perturbed_results": {
+    "clean": 0.5242,
+    "edge_frac0.001": 0.5242,
+    "edge_frac0.005": 0.5242,
+    "edge_frac0.01": 0.5242,
+    "edge_frac0.05": 0.5242,
+    "feat_eps0.001": 0.5239,
+    "feat_eps0.005": 0.5242,
+    "feat_eps0.01": 0.5242,
+    "feat_eps0.05": 0.5191
+  }
+}
